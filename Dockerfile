@@ -1,3 +1,10 @@
+# `docker build --target test` runs the suite in this image.
+# The demo image below does not run it.
+FROM golang:1.27 AS test
+WORKDIR /src
+COPY . .
+RUN go test ./...
+
 FROM golang:1.27 AS build
 WORKDIR /src
 COPY . .

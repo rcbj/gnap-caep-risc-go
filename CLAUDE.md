@@ -13,8 +13,10 @@ done, err := client.FinishRedirect(query, []string{started.Pending.ID})
 ## Tests
 
 ```bash
-go test ./...
+docker build --target test .
 ```
+
+The `test` stage runs `go test ./...` in `golang:1.27`. GitHub Actions uses that command. Do not run the Go toolchain on the host. The demo image does not run the suite.
 
 Tests use an in-process stub on 127.0.0.1. They do not need a live authorization server.
 

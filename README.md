@@ -4,11 +4,13 @@ A server-side [GNAP](https://www.rfc-editor.org/rfc/rfc9635) client. The key is 
 
 The private key stays in this process. The same `gnap.json` shape as the Python and Node libraries loads: the JSON keys are identical.
 
-## Install from a checkout
+## Build and tests
 
 ```bash
-go test ./...
+docker build --target test .
 ```
+
+The `test` stage runs `go test ./...` in `golang:1.27`. GitHub Actions uses that command. Do not run the Go toolchain on the host. The demo image does not run the suite.
 
 Module path: `github.com/rcbj/gnap-caep-risc-go`. A proxy or GitHub publish is not set up.
 
@@ -35,7 +37,7 @@ done, err := gnapClient.FinishRedirect(query, []string{started.Pending.ID})
 ## Demo
 
 ```bash
-go run ./cmd/demo
+docker compose up --build
 ```
 
 `PORT` defaults to 3000 and is the bind port. Loopback finish and display URLs follow `PORT`. Any other host is left as written. `PUBLIC_URL` or `--public-url` replaces the origin and keeps the path. `GET /healthz` returns `ok`. The home page has a sign-in control; `/login` starts a grant, `/callback` finishes it, and `POST /logout` signs out.
