@@ -68,6 +68,10 @@ type demoServer struct {
 	sessions    map[string]sessionRecord
 	receiver    *gnap.SignalsReceiver
 	latest      *gnap.Grant
+	// receiverState and liveEvents are for GET /live-status: the receiver's state, and the type and
+	// jti of each event it accepted. No tokens.
+	receiverState string
+	liveEvents    []map[string]string
 }
 
 func newDemo(public string, given bool, port string) *demoServer {
@@ -82,13 +86,15 @@ func newDemo(public string, given bool, port string) *demoServer {
 		configPath = filepath.Join("demo", "gnap.json")
 	}
 	return &demoServer{
-		configPath:  configPath,
-		publicDir:   filepath.Join(filepath.Dir(configPath), "public"),
-		publicURL:   public,
-		publicGiven: given,
-		port:        port,
-		secret:      secret,
-		sessions:    map[string]sessionRecord{},
+		configPath:    configPath,
+		publicDir:     filepath.Join(filepath.Dir(configPath), "public"),
+		publicURL:     public,
+		publicGiven:   given,
+		port:          port,
+		secret:        secret,
+		sessions:      map[string]sessionRecord{},
+		receiverState: "not started (no sign-in yet)",
+		liveEvents:    []map[string]string{},
 	}
 }
 
@@ -105,6 +111,8 @@ func (d *demoServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("content-type", "text/plain")
 		w.WriteHeader(200)
 		_, _ = io.WriteString(w, "ok")
+	case path == "/live-status" && r.Method == http.MethodGet:
+		d.liveStatus(w, r)
 	case path == "/styles.css" && r.Method == http.MethodGet:
 		d.static(w, "styles.css", "text/css; charset=utf-8")
 	case path == "/app.js" && r.Method == http.MethodGet:
@@ -195,6 +203,96 @@ func (d *demoServer) gnap() (*gnap.Client, error) {
 	d.client = gnap.New(cfg)
 	d.clientErr = ""
 	return d.client, nil
+}
+
+// liveStatus is JSON for scripts/live_iya_sts.py: whether this browser is signed in, as whom, the
+// receiver's state, and the type and jti of every event received. It carries no tokens.
+func (d *demoServer) liveStatus(w http.ResponseWriter, r *http.Request) {
+	var subject any
+	session := d.session(r)
+	if session != nil && session.person != nil {
+		person := session.person
+		for _, value := range []string{person.PreferredUsername, person.Email, person.Name, person.Sub} {
+			if value != "" {
+				subject = value
+				break
+			}
+		}
+	}
+	d.mu.Lock()
+	events := append([]map[string]string{}, d.liveEvents...)
+	state := d.receiverState
+	d.mu.Unlock()
+	raw, _ := json.Marshal(map[string]any{
+		"signedIn": session != nil,
+		"subject":  subject,
+		"receiver": state,
+		"events":   events,
+	})
+	w.Header().Set("content-type", "application/json")
+	w.Header().Set("cache-control", "no-store")
+	w.WriteHeader(200)
+	_, _ = w.Write(raw)
+}
+
+// trackedID is the id the receiver knows a session by: the grant id, or the subject.
+func trackedID(grant *gnap.Grant) string {
+	if grant == nil {
+		return ""
+	}
+	if grant.GrantID != "" {
+		return grant.GrantID
+	}
+	if grant.Subject != nil {
+		return grant.Subject.Sub
+	}
+	return ""
+}
+
+// endTracked ends every cookie session whose grant the receiver tracks under one of ids. The cookie
+// id and the tracked id differ, so this looks the sessions up by grant.
+func (d *demoServer) endTracked(ids []string) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ended := 0
+	for local, record := range d.sessions {
+		known := trackedID(record.grant)
+		for _, id := range ids {
+			if known != "" && known == id {
+				delete(d.sessions, local)
+				ended++
+				break
+			}
+		}
+	}
+	return ended
+}
+
+// remember records an accepted event for /live-status. A session-revoked event that ended no tracked
+// session still ends this demo's one local session, if it has exactly one: the event can name the
+// sign-on session by an id the grant did not carry.
+func (d *demoServer) remember(event *gnap.SignalEvent) {
+	d.mu.Lock()
+	d.liveEvents = append(d.liveEvents, map[string]string{"type": event.Type, "jti": event.JTI})
+	if len(d.liveEvents) > 100 {
+		d.liveEvents = d.liveEvents[len(d.liveEvents)-100:]
+	}
+	var orphan *sessionRecord
+	if event.Type == gnap.EventSessionRevoked && !event.Ended && len(d.sessions) == 1 {
+		for local, record := range d.sessions {
+			copied := record
+			orphan = &copied
+			delete(d.sessions, local)
+		}
+	}
+	receiver := d.receiver
+	d.mu.Unlock()
+	if orphan != nil {
+		fmt.Println("ssf: session-revoked matched no tracked session; ending this demo's one local session")
+		if receiver != nil {
+			receiver.Untrack(trackedID(orphan.grant))
+		}
+	}
 }
 
 func (d *demoServer) tryClient() *gnap.Client {
@@ -395,12 +493,17 @@ func (d *demoServer) watch(grant *gnap.Grant, person *gnap.Person) {
 	d.mu.Lock()
 	d.latest = grant
 	if d.receiver != nil {
+		receiver := d.receiver
 		d.mu.Unlock()
+		receiver.Track(tracked(grant, person))
 		return
 	}
 	d.mu.Unlock()
 	wanted := d.signalsWanted()
 	if wanted == nil {
+		d.mu.Lock()
+		d.receiverState = "not configured (signals are off, or no ssf.transmitter)"
+		d.mu.Unlock()
 		return
 	}
 	interval := 5000
@@ -425,11 +528,7 @@ func (d *demoServer) watch(grant *gnap.Grant, person *gnap.Person) {
 		return
 	}
 	receiver, err := gnap.NewSignalsReceiver(transmitter, func(ids []string, event *gnap.SignalEvent) {
-		d.mu.Lock()
-		for _, id := range ids {
-			delete(d.sessions, id)
-		}
-		d.mu.Unlock()
+		d.endTracked(ids)
 	}, gnap.ReceiverOpt{
 		TLS: tlsOpt,
 		Headers: func(request gnap.SSFRequest) map[string]string {
@@ -460,10 +559,22 @@ func (d *demoServer) watch(grant *gnap.Grant, person *gnap.Person) {
 		fmt.Println("ssf: not started:", err)
 		return
 	}
+	receiver.On("*", d.remember)
 	if err := receiver.Start(); err != nil {
 		fmt.Println("ssf: not started:", err)
+		d.mu.Lock()
+		d.receiverState = "not running: " + err.Error()
+		d.mu.Unlock()
 		return
 	}
+	receiver.Track(tracked(grant, person))
+	d.mu.Lock()
+	d.receiver = receiver
+	d.receiverState = fmt.Sprintf("polling stream %v at %s", receiver.Stream["stream_id"], transmitter)
+	d.mu.Unlock()
+}
+
+func tracked(grant *gnap.Grant, person *gnap.Person) gnap.TrackedSession {
 	local := grant.GrantID
 	if local == "" && person != nil {
 		local = person.Sub
@@ -473,10 +584,7 @@ func (d *demoServer) watch(grant *gnap.Grant, person *gnap.Person) {
 		value := *grant.ExpiresAt
 		expires = &value
 	}
-	receiver.Track(gnap.TrackedFromPerson(local, person, expires))
-	d.mu.Lock()
-	d.receiver = receiver
-	d.mu.Unlock()
+	return gnap.TrackedFromPerson(local, person, expires)
 }
 
 func (d *demoServer) session(r *http.Request) *sessionRecord {
