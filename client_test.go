@@ -810,3 +810,30 @@ func TestCertificateChainPutsTheLeafInTheKeyAndTheChainOnTLS(t *testing.T) {
 		t.Fatal(tlsOpt.Cert)
 	}
 }
+
+// queryNames reads only the query of a finish redirect, whatever is in front
+// of it: a leading "//" or "/\" (a scheme-relative URL to another host) is
+// never followed or returned, so the leading-slash test is not a redirect check.
+func TestQueryNamesReadsOnlyTheQuery(t *testing.T) {
+	want := map[string][]string{"hash": {"h"}, "interact_ref": {"r"}}
+	for _, query := range []string{
+		"hash=h&interact_ref=r",
+		"?hash=h&interact_ref=r",
+		"/callback?hash=h&interact_ref=r",
+		"//evil.example/callback?hash=h&interact_ref=r",
+		"https://evil.example/callback?hash=h&interact_ref=r",
+	} {
+		names, err := queryNames(query)
+		if err != nil {
+			t.Fatalf("%q: %v", query, err)
+		}
+		if len(names) != len(want) || names["hash"][0] != "h" || names["interact_ref"][0] != "r" {
+			t.Fatalf("%q: got %v", query, names)
+		}
+		for key := range names {
+			if key != "hash" && key != "interact_ref" {
+				t.Fatalf("%q: unexpected name %q", query, key)
+			}
+		}
+	}
+}
