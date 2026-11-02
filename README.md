@@ -12,6 +12,8 @@ docker build --target test .
 
 The `test` stage runs `go test ./...` in `golang:1.27`. GitHub Actions uses that command. Do not run the Go toolchain on the host. The demo image does not run the suite.
 
+`python3 scripts/live_iya_sts.py` is the live half. It starts a fresh iya-sts from its `main` branch in memory mode when `IYA_STS_URL` is unset (`IYA_STS_IMAGE` names an iya-sts image to start instead of building one). It makes the client key and its self-signed certificate with openssl in the demo image, registers the demo with `scripts/configure_iya_sts.py` (standard-library Python on the host), starts the demo image, signs in, and requires a credential-change event and a session-revoked event on `GET /live-status`. The second event ends the local session. `LIVE_STS_PORT` (default 18519) and `LIVE_DEMO_PORT` (default 18619) choose the ports. It never binds port 3000 or 8081, and it runs no Go on the host. The nightly workflow runs the unit suite and this script at 07:14 UTC.
+
 Module path: `github.com/rcbj/gnap-caep-risc-go`. A proxy or GitHub publish is not set up.
 
 ## Three calls
@@ -40,7 +42,7 @@ done, err := gnapClient.FinishRedirect(query, []string{started.Pending.ID})
 docker compose up --build
 ```
 
-`PORT` defaults to 3000 and is the bind port. Loopback finish and display URLs follow `PORT`. Any other host is left as written. `PUBLIC_URL` or `--public-url` replaces the origin and keeps the path. `GET /healthz` returns `ok`. The home page has a sign-in control; `/login` starts a grant, `/callback` finishes it, and `POST /logout` signs out.
+`PORT` defaults to 3000 and is the bind port. Loopback finish and display URLs follow `PORT`. Any other host is left as written. `PUBLIC_URL` or `--public-url` replaces the origin and keeps the path. `GET /healthz` returns `ok`. `GET /live-status` is JSON for the sign-in in this browser and the Shared Signals events the demo has accepted: `signedIn`, `subject`, `receiver`, and events of `type` and `jti`. It does not include tokens. The home page has a sign-in control; `/login` starts a grant, `/callback` finishes it, and `POST /logout` signs out.
 
 The shipped `demo/gnap.json` leaves `signals` on by omitting the key. Key material is `file:` or `env:` and is not in the tree. Register the application with:
 

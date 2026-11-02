@@ -83,6 +83,16 @@ func verifyPinned(rawCerts [][]byte, caPEM, host string) error {
 	return leaf.VerifyHostname(host)
 }
 
+// presentClientCertificate always answers a CertificateRequest with the configured pair. GNAP's mtls
+// proof registers that certificate by value, and it is usually self-signed, while an authorization
+// server such as iya-sts names only its own CA in certificate_authorities. tls.Config.Certificates
+// would then match nothing and send no certificate at all, so the proof would fail.
+func presentClientCertificate(pair tls.Certificate) func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+	return func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+		return &pair, nil
+	}
+}
+
 func Send(rawURL, method string, headers map[string]string, body *string, tlsOpt TLSOpt, code string) (*Answer, error) {
 	if _, err := parseAbsolute(rawURL); err != nil {
 		return nil, fail(code, rawURL+" is not an http(s) URL")
@@ -125,7 +135,7 @@ func Send(rawURL, method string, headers map[string]string, body *string, tlsOpt
 		if err != nil {
 			return nil, failCause(code, rawURL+": "+err.Error(), err)
 		}
-		cfg.Certificates = []tls.Certificate{pair}
+		cfg.GetClientCertificate = presentClientCertificate(pair)
 	}
 	transport.TLSClientConfig = cfg
 	client := &http.Client{
