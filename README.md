@@ -14,7 +14,7 @@ The `test` stage runs `go test ./...` in `golang:1.27`. GitHub Actions uses that
 
 `python3 scripts/live_iya_sts.py` is the live half. It starts a fresh iya-sts from its `main` branch in memory mode when `IYA_STS_URL` is unset (`IYA_STS_IMAGE` names an iya-sts image to start instead of building one). It copies this checkout to a scratch build context, makes the client key and its self-signed certificate there with openssl in the demo image, and runs the install script `scripts/configure_iya_sts.py` (standard-library Python on the host), which registers the demo and writes the `tlsCa` chain. Then it rebuilds the demo image, checks the image carries that chain and no key, starts it with only the key and certificate mounted, no CA mount and `TLS_CA_REFRESH=0`, signs in, and requires a credential-change event and a session-revoked event on `GET /live-status`. The second event ends the local session. `LIVE_STS_PORT` (default 18560) and `LIVE_DEMO_PORT` (default 18660) choose the ports. It never binds port 3000 or 8081, and it runs no Go on the host. The nightly workflow runs the unit suite and this script at 07:14 UTC.
 
-Module path: `github.com/rcbj/gnap-caep-risc-go`. A proxy or GitHub publish is not set up.
+Module path: `github.com/rcbj/gnap-caep-risc-go`. A release happens when the library's files changed since the last release's tag: `release.yml` takes one patch above the highest published version, publishes it, and creates the matching tag and GitHub Release. A change to tests, the demo, or the docs releases nothing. To choose a version or start a new minor, raise `VERSION`; the version is stamped in CI and is not committed, so the manifests can trail what is published.
 
 ## The iya-sts trust chain (`tlsCa`)
 

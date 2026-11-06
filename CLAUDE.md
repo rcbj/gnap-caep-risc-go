@@ -59,4 +59,8 @@ Omitted or `true` keeps CAEP and RISC on, and the resolved configuration omits `
 
 MIT. Copyright (c) 2026 Iya CyberSecurity Solutions, LLC.
 
-`develop` and `main` must be the same commit. Publishing is not set up.
+`develop` and `main` must be the same commit. A release happens when the library's files changed since the last release's tag: `release.yml` takes one patch above the highest published version, publishes it, and creates the matching tag and GitHub Release. A change to tests, the demo, or the docs releases nothing. To choose a version or start a new minor, raise `VERSION`; the version is stamped in CI and is not committed, so the manifests can trail what is published.
+
+## Releases
+
+A Go module publishes through its tag. A release happens when the library's files changed since the last release's tag: `release.yml` takes one patch above the highest published version, publishes it, and creates the matching tag and GitHub Release. A change to tests, the demo, or the docs releases nothing. To choose a version or start a new minor, raise `VERSION`; the version is stamped in CI and is not committed, so the manifests can trail what is published. `release.yml` then asks the module proxy to fetch the version.
